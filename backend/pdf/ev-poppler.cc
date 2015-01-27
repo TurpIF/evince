@@ -1539,60 +1539,66 @@ pdf_document_links_get_links (EvDocumentLinks *document_links,
 	poppler_page_free_link_mapping (mapping_list);
 
     char * page_text = poppler_page_get_text (poppler_page);
-    const char * str_regex = "_^(?:(?:https?|ftp)://)(?:\\S+(?::\\S*)?@)?(?:(?!10(?:\\.\\d{1,3}){3})(?!127(?:\\.\\d{1,3}){3})(?!169\\.254(?:\\.\\d{1,3}){2})(?!192\\.168(?:\\.\\d{1,3}){2})(?!172\\.(?:1[6-9]|2\\d|3[0-1])(?:\\.\\d{1,3}){2})(?:[1-9]\\d?|1\\d\\d|2[01]\\d|22[0-3])(?:\\.(?:1?\\d{1,2}|2[0-4]\\d|25[0-5])){2}(?:\\.(?:[1-9]\\d?|1\\d\\d|2[0-4]\\d|25[0-4]))|(?:(?:[a-z\\x{00a1}-\\x{ffff}0-9]+-?)*[a-z\\x{00a1}-\\x{ffff}0-9]+)(?:\\.(?:[a-z\\x{00a1}-\\x{ffff}0-9]+-?)*[a-z\\x{00a1}-\\x{ffff}0-9]+)*(?:\\.(?:[a-z\\x{00a1}-\\x{ffff}]{2,})))(?::\\d{2,5})?(?:/[^\\s]*)?$_iuS";
+
+    // Source : https://mathiasbynens.be/demo/url-regex @imme_emosol
+    const char * str_regex = "(https?|ftp)://(-\\.)?([^\\s/?\\.#-]+\\.?)+(/[^\\s]*)?";
     regex_t preg;
     if (regcomp (&preg, str_regex, REG_NOSUB | REG_EXTENDED) != 0) {
       fprintf (stderr, "regcomp failed\n");
     }
-    for (char * text_it = page_text; *text_it != '\0'; text_it++) {
-      if (strncmp (text_it, "http://", 7) == 0
-          || strncmp (text_it, "https://", 8) == 0) {
-        char * uri_begin = text_it;
-        long int uri_size;
+    else {
+      for (char * text_it = page_text; *text_it != '\0'; text_it++) {
+        if (strncmp (text_it, "http://", 7) == 0
+            || strncmp (text_it, "https://", 8) == 0) {
+          char * uri_begin = text_it;
+          long int uri_size;
 
-        for (; *text_it != '\0' && *text_it != ' ' && *text_it != '\n'; text_it++);
-        uri_size = (long int) text_it - (long int) uri_begin;
+          for (; *text_it != '\0' && *text_it != ' ' && *text_it != '\n'; text_it++);
+          uri_size = (long int) text_it - (long int) uri_begin;
 
-        char * uri_string = g_new (char, uri_size + 1);
-        strncpy (uri_string, uri_begin, uri_size);
-        uri_string[uri_size] = '\0';
+          char * uri_string = g_new (char, uri_size + 1);
+          strncpy (uri_string, uri_begin, uri_size);
+          uri_string[uri_size] = '\0';
 
-        printf("%s\n", uri_string);
-        GList * found = poppler_page_find_text(poppler_page, uri_string);
-        for (GList * l = found; l; l = l->next) {
-          PopplerRectangle * rect = (PopplerRectangle *) l->data;
-          PopplerLinkMapping *link_mapping;
-          EvMapping *ev_link_mapping;
+          if (regexec (&preg, uri_string, 0, NULL, 0) == 0) {
+            printf("%s\n", uri_string);
+            GList * found = poppler_page_find_text(poppler_page, uri_string);
+            for (GList * l = found; l; l = l->next) {
+              PopplerRectangle * rect = (PopplerRectangle *) l->data;
+              PopplerLinkMapping *link_mapping;
+              EvMapping *ev_link_mapping;
 
-          link_mapping = poppler_link_mapping_new();
-          link_mapping->action = g_new (PopplerAction, 1);
-          link_mapping->action->type = POPPLER_ACTION_URI;
-          link_mapping->action->uri.title = uri_string;
-          link_mapping->action->uri.uri = uri_string;
-          link_mapping->area.x1 = rect->x1;
-          link_mapping->area.y1 = rect->y1;
-          link_mapping->area.x2 = rect->x2;
-          link_mapping->area.y2 = rect->y2;
+              link_mapping = poppler_link_mapping_new();
+              link_mapping->action = g_new (PopplerAction, 1);
+              link_mapping->action->type = POPPLER_ACTION_URI;
+              link_mapping->action->uri.title = uri_string;
+              link_mapping->action->uri.uri = uri_string;
+              link_mapping->area.x1 = rect->x1;
+              link_mapping->area.y1 = rect->y1;
+              link_mapping->area.x2 = rect->x2;
+              link_mapping->area.y2 = rect->y2;
 
-          ev_link_mapping = g_new (EvMapping, 1);
-          ev_link_mapping->data = ev_link_from_action (pdf_document,
-              link_mapping->action);
-          ev_link_mapping->area.x1 = link_mapping->area.x1;
-          ev_link_mapping->area.x2 = link_mapping->area.x2;
-          /* Invert this for X-style coordinates */
-          ev_link_mapping->area.y1 = height - link_mapping->area.y2;
-          ev_link_mapping->area.y2 = height - link_mapping->area.y1;
+              ev_link_mapping = g_new (EvMapping, 1);
+              ev_link_mapping->data = ev_link_from_action (pdf_document,
+                  link_mapping->action);
+              ev_link_mapping->area.x1 = link_mapping->area.x1;
+              ev_link_mapping->area.x2 = link_mapping->area.x2;
+              /* Invert this for X-style coordinates */
+              ev_link_mapping->area.y1 = height - link_mapping->area.y2;
+              ev_link_mapping->area.y2 = height - link_mapping->area.y1;
 
-          g_free (link_mapping->action);
-          link_mapping->action = NULL;
-          poppler_link_mapping_free(link_mapping);
+              g_free (link_mapping->action);
+              link_mapping->action = NULL;
+              poppler_link_mapping_free(link_mapping);
 
-          retval = g_list_prepend (retval, ev_link_mapping);
+              retval = g_list_prepend (retval, ev_link_mapping);
+            }
+            g_list_free(found);
+          }
+          g_free (uri_string);
         }
-
-        g_free (uri_string);
-        g_list_free(found);
       }
+      regfree (&preg);
     }
 
 	return ev_mapping_list_new (page->index, g_list_reverse (retval), (GDestroyNotify)g_object_unref);
